@@ -7,7 +7,7 @@
 #include <Adafruit_I2CDevice.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <pubsubclient.h>
+#include <pubsubClient.h>
 #include <ESP8266WiFi.h>
 #include <SoftwareSerial.h>
 #include <MHZ19.h>
@@ -33,8 +33,8 @@ MHZ19 mhz(&mzh_ss);
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 
-const char *hostname = "ESP8266 CO2 Sensor";
-const char *ap_ssid = "CO2-Sensor";
+const char *hostname = "ESP8266 Air Sensor";
+const char *ap_ssid = "AirSensor";
 
 unsigned long measurementIntervalMs;
 
@@ -46,7 +46,7 @@ char humidBuffer[8];
 char co2Buffer[16];
 
 WiFiClient espClient;
-PubSubClient client(espClient);
+PubSubClient mqttClient(espClient);
 
 // inicializace DHT senzoru s nastaveným pinem a typem senzoru
 DHT dhtSensor(pinDHT, DHT22);
@@ -74,6 +74,29 @@ void saveConfigCallback()
 {
 	Serial.println("Should save config");
 	shouldSaveConfig = true;
+}
+
+bool mqttConnect()
+{
+	if (mqttClient.connected())
+	{
+		return true;
+	}
+
+
+	Serial.println("Connecting to MQTT...");
+
+	if (mqttClient.connect("ESP8266Client", mqtt_username, mqtt_password))
+	{
+		Serial.println("connected");
+		return true;
+	}
+	else
+	{
+		Serial.print("failed with state ");
+		Serial.print(mqttClient.state());
+		return false;
+	}
 }
 
 void setup()
@@ -260,22 +283,7 @@ void setup()
 	Serial.println("MAC address: ");
 	Serial.println(WiFi.macAddress());
 
-	client.setServer(mqtt_server, strtoul(mqtt_port, NULL, 10));
-	//client.setCallback(callback);
-	while (!client.connected())
-	{
-		Serial.println("Connecting to MQTT...");
-		if (client.connect("ESP8266Client", mqtt_username, mqtt_password))
-		{
-			Serial.println("connected");
-		}
-		else
-		{
-			Serial.print("failed with state ");
-			Serial.print(client.state());
-			delay(2000);
-		}
-	}
+	mqttClient.setServer(mqtt_server, strtoul(mqtt_port, NULL, 10));
 
 	measurementIntervalMs = strtoul(measurement_interval_second, NULL, 10) * 1000;
 	lastTime = -measurementIntervalMs;
@@ -337,12 +345,15 @@ void loop()
 		humidStr = String(fHumid, 1);
 		humidStr.toCharArray(humidBuffer, humidStr.length() + 1);
 
-		client.publish(mqtt_channel_temperature, tempBuffer);
-		Serial.print("Temperature published to: ");
-		Serial.println(mqtt_channel_temperature);
-		client.publish(mqtt_channel_humidity, humidBuffer);
-		Serial.print("Humidity published to: ");
-		Serial.println(mqtt_channel_humidity);
+		if (mqttConnect())
+		{
+			mqttClient.publish(mqtt_channel_temperature, tempBuffer);
+			Serial.print("Temperature published to: ");
+			Serial.println(mqtt_channel_temperature);
+			mqttClient.publish(mqtt_channel_humidity, humidBuffer);
+			Serial.print("Humidity published to: ");
+			Serial.println(mqtt_channel_humidity);
+		}
 	}
 
 	MHZ19_RESULT response = mhz.retrieveData();
@@ -360,9 +371,12 @@ void loop()
 		co2Str = String(co2, 10);
 		co2Str.toCharArray(co2Buffer, co2Str.length() + 1);
 
-		client.publish(mqtt_channel_co2, co2Buffer);
-		Serial.print("CO2 level published to: ");
-		Serial.println(mqtt_channel_co2);
+		if (mqttConnect())
+		{
+			mqttClient.publish(mqtt_channel_co2, co2Buffer);
+			Serial.print("CO2 level published to: ");
+			Serial.println(mqtt_channel_co2);
+		}
 	}
 	else
 	{
@@ -380,5 +394,5 @@ void loop()
 
 	display.display();
 
-	//client.loop();
+	//mqttClient.loop();
 }
